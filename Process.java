@@ -1,4 +1,3 @@
-// Process.java
 import java.util.concurrent.Semaphore;
 
 public abstract class Process implements Runnable{
@@ -45,12 +44,28 @@ public abstract class Process implements Runnable{
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                OS.currentProcess.set(this);
                 runSemaphore.acquire();
+                
+                if (this instanceof UserlandProcess) {
+                    UserlandProcess up = (UserlandProcess) this;
+                    PCB pcb = up.getPCB();
+                    if (pcb != null) {
+                        PCB.setCurrent(pcb);
+                    } else {
+                        System.out.println("WARNING - PCB is null!");
+                    }
+                }
+                
                 main();
+                
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
+            } finally {
+                if (this instanceof UserlandProcess) {
+                   
+                    PCB.setCurrent(null);
+                }
             }
         }
     }

@@ -6,7 +6,7 @@ public class SleeperProcess extends UserlandProcess {
             round++;
             System.out.println("Sleeper round " + round + " running");
             cooperate();
-            OS.Sleep(1000);
+            OS.Sleep(1000); // request kernel sleep for 1 second
         }
     }
 }

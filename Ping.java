@@ -1,11 +1,10 @@
-// Ping.java
 public class Ping extends UserlandProcess {
     @Override
     public void main() {
         System.out.println("Ping process started");
         int pongPid = OS.GetPidByName("Pong");
         while (pongPid == -1) {
-            OS.Sleep(50);  // Short sleep to avoid busy-waiting; adjust if needed
+            OS.Sleep(50);  // Short sleep to avoid busy-waiting; 
             pongPid = OS.GetPidByName("Pong");
         }
         System.out.println("I am PING, pong = " + pongPid);

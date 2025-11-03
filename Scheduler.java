@@ -1,10 +1,8 @@
-// Scheduler.java
 import java.util.*;
 import java.util.concurrent.*;
 
 public class Scheduler {
 
-    // queue types as defined in rubric
     final LinkedList<PCB> realtimeQueue;
     final LinkedList<PCB> interactiveQueue;
     final LinkedList<PCB> backgroundQueue;
@@ -99,6 +97,12 @@ public class Scheduler {
         }
 
         PCB next = chosen.pollFirst();
+        
+        // Only clear TLB if we're actually switching to a different process
+        if (next != null && currentlyRunning != next) {
+            Hardware.ClearTLB();
+        }
+        
         currentlyRunning = next;
         return next;
     }

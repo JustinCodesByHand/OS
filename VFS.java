@@ -1,14 +1,13 @@
 public class VFS implements Device {
-    // Virtual File System: manages logical connections to multiple device types.
-    private static final int MAX_DEVICES = 10; 
-    private Device[] devices = new Device[MAX_DEVICES];  // maps VFS slot -> actual device object
-    private int[] deviceIds = new int[MAX_DEVICES];      // maps VFS slot -> device’s own internal ID
+    private static final int MAX_DEVICES = 10;
+    private Device[] devices = new Device[MAX_DEVICES];
+    private int[] deviceIds = new int[MAX_DEVICES];
 
     private RandomDevice randomDevice = new RandomDevice();
     private FakeFileSystem fakeFileSystem = new FakeFileSystem();
 
     public VFS() {
-        // initialize all slots as empty (-1 = unused)
+        // Initialize as empty
         for (int i = 0; i < MAX_DEVICES; i++) {
             devices[i] = null;
             deviceIds[i] = -1;
@@ -16,105 +15,75 @@ public class VFS implements Device {
     }
 
     @Override
-    public int Open(String deviceSpec) {
-        if (deviceSpec == null) return -1;
-        String trimmed = deviceSpec.trim();
-        if (trimmed.isEmpty()) return -1;
-
-        String deviceName;
-        String params;
-
-        // Device spec is in form like:
-        //   "random 12345"  -> open random device with seed 12345
-        //   "file test.txt" -> open file named test.txt
-        //   "test.txt"      -> implicit "file" device
-        int sp = trimmed.indexOf(' ');
-        if (sp == -1) {
-            // no space means no explicit device name — infer type
-            if (trimmed.equalsIgnoreCase("random")) {
-                deviceName = "random";
-                params = "";
-            } else if (trimmed.equalsIgnoreCase("file")) {
-                // invalid, needs a filename after 'file'
-                return -1;
-            } else {
-                // default assumption: it's a file path
-                deviceName = "file";
-                params = trimmed;
-            }
-        } else {
-            // split the name and its parameters
-            deviceName = trimmed.substring(0, sp);
-            params = trimmed.substring(sp + 1).trim();
-        }
-
-        // Identify which device driver to call
-        Device targetDevice;
-        if ("random".equalsIgnoreCase(deviceName)) {
-            targetDevice = randomDevice;
-        } else if ("file".equalsIgnoreCase(deviceName)) {
-            targetDevice = fakeFileSystem;
-        } else {
-            // unknown device name
+    public synchronized int Open(String deviceSpec) {
+        if (deviceSpec == null || deviceSpec.isEmpty()) {
             return -1;
         }
 
-        
-        // Each device driver  maintains its own internal IDs
-        // The kernel only sees the logical "VFS slot" index.
-        // So: targetDevice.Open(params) returns a device-specific handle (underlyingId),
-        int underlyingId = targetDevice.Open(params);
-        if (underlyingId == -1) return -1; // device refused to open (e.g., invalid file)
+        // Parse device specification
+        Device targetDevice = fakeFileSystem;
+        String params = deviceSpec;
 
-        // Store this open connection in the first free VFS slot
+        if (deviceSpec.startsWith("random")) {
+            targetDevice = randomDevice;
+            // Extract seed if provided (format: "random 12345" or just "random")
+            params = deviceSpec.length() > 6 ? deviceSpec.substring(7).trim() : "";
+        } else if (deviceSpec.startsWith("file ")) {
+            // Explicit file prefix (format: "file myfile.txt")
+            targetDevice = fakeFileSystem;
+            params = deviceSpec.substring(5).trim();
+        }
+        // If no prefix, default to file with full deviceSpec as filename
+
+        // Open device
+        int underlyingId = targetDevice.Open(params);
+        if (underlyingId == -1) return -1;
+
+        // Find empty VFS slot
         for (int i = 0; i < MAX_DEVICES; i++) {
             if (devices[i] == null) {
-                devices[i] = targetDevice;   
-                deviceIds[i] = underlyingId; 
-                return i;                    
+                devices[i] = targetDevice;
+                deviceIds[i] = underlyingId;
+                return i;
             }
         }
 
-        // if no slot was free, close it immediately 
+        // No slots available - clean up
         targetDevice.Close(underlyingId);
         return -1;
     }
 
     @Override
-    public void Close(int id) {
-        // Verify slot is valid and in use
+    public synchronized void Close(int id) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
-            int underlying = deviceIds[id];  
-            devices[id].Close(underlying);   
-            devices[id] = null;              
+            devices[id].Close(deviceIds[id]);
+            devices[id] = null;
             deviceIds[id] = -1;
         }
     }
 
     @Override
-    public byte[] Read(int id, int size) {
-        // VFS reads simply forward to the underlying device
+    public synchronized byte[] Read(int id, int size) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
-            int underlying = deviceIds[id];
-            return devices[id].Read(underlying, size);
+            return devices[id].Read(deviceIds[id], size);
         }
         return null;
     }
 
     @Override
-    public void Seek(int id, int to) {
+    public synchronized void Seek(int id, int to) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
-            int underlying = deviceIds[id];
-            devices[id].Seek(underlying, to);
+            devices[id].Seek(deviceIds[id], to);
         }
     }
 
     @Override
-    public int Write(int id, byte[] data) {
+    public synchronized int Write(int id, byte[] data) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
-            int underlying = deviceIds[id];
-            return devices[id].Write(underlying, data);
+            int result = devices[id].Write(deviceIds[id], data);
+            return result;
         }
+       
         return 0;
     }
 }

@@ -1,4 +1,3 @@
-// KernelMessage.java
 public class KernelMessage {
     private int senderPid;
     private int targetPid;

@@ -11,7 +11,7 @@ public class GoodbyeWorld extends UserlandProcess {
             cooperate();
 
             try {
-                Thread.sleep(20);
+                Thread.sleep(20); // slow for readability
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;

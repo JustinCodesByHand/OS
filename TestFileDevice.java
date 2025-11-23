@@ -4,7 +4,7 @@ public class TestFileDevice extends UserlandProcess {
     public void main() {
         System.out.println("TestFileDevice process started");
 
-        // Test 1: Write and read back
+        // Write and read back
         int id = OS.Open("testfile.txt");
         if (id >= 0) {
             System.out.println("Opened file 'testfile.txt', id=" + id);
@@ -44,6 +44,10 @@ public class TestFileDevice extends UserlandProcess {
         }
 
         System.out.println("TestFileDevice finished");
+        System.out.println("TestFileDevice: Calling OS.Exit()...");
+        System.out.flush();
         OS.Exit();
+        System.out.println("TestFileDevice: After OS.Exit() - THIS SHOULD NOT PRINT");
+        System.out.flush();
     }
 }

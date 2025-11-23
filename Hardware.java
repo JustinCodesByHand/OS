@@ -16,7 +16,7 @@ public class Hardware {
     }
     
     /**
-     * Clear the TLB (set all entries to -1)
+     * Clear the TLB by setting all entries to -1
      * Called on process switch
      */
     public static void ClearTLB() {
@@ -37,14 +37,14 @@ public class Hardware {
         int physicalPage = LookupTLB(virtualPage);
         
         if (physicalPage == -1) {
-            // TLB miss - need to get mapping from OS
+            // TLB miss, need to get mapping from OS
             OS.GetMapping(virtualPage);
             
-            // Try TLB again - should be there now
+            // Try TLB again, should be there now
             physicalPage = LookupTLB(virtualPage);
             
             if (physicalPage == -1) {
-                // Still not in TLB - process was killed for seg fault
+                // Still not in TLB, process was killed for seg fault
                 throw new RuntimeException("Process terminated - segmentation fault on read");
             }
         }
@@ -65,14 +65,14 @@ public class Hardware {
         int physicalPage = LookupTLB(virtualPage);
         
         if (physicalPage == -1) {
-            // TLB miss - need to get mapping from OS
+            // TLB miss, need to get mapping from OS
             OS.GetMapping(virtualPage);
             
-            // Try TLB again - should be there now
+            // Try TLB again, should be there now
             physicalPage = LookupTLB(virtualPage);
             
             if (physicalPage == -1) {
-                // Still not in TLB - process was killed for seg fault
+                // Still not in TLB,  process was killed for seg fault
                 throw new RuntimeException("Process terminated - segmentation fault on write");
             }
         }
@@ -119,13 +119,19 @@ public class Hardware {
     /**
      * Update TLB with new mapping
      * Called by OS.GetMapping() 
-     * Uses random replacement policy
+     * Uses random replacement
      */
     public static void UpdateTLB(int virtualPage, int physicalPage) {
-        // Random replacement - pick entry 0 or 1
+        // Random replacement, pick entry 0 or 1
         int entry = (int)(Math.random() * 2);
         tlb[entry][0] = virtualPage;
         tlb[entry][1] = physicalPage;
-        
+    }
+    
+    /**
+     * NEW: Allow kernel to access physical memory directly for swapping
+     */
+    public static byte[] getMemory() {
+        return memory;
     }
 }

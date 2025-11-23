@@ -12,16 +12,13 @@ public class PCB {
 
     private int[] deviceIds = new int[10];
 
-    // For storing syscall return values per-process
     public Object syscallReturnValue = null;
 
     public LinkedList<KernelMessage> messageQueue = new LinkedList<>();
 
-    // Page table: index is virtual page number, value is physical page number
-    // -1 means no mapping exists for that virtual page
-    private int[] pageTable = new int[100];
     
-    // Thread-local storage to track which PCB owns which thread
+    private VirtualToPhysicalMapping[] pageTable = new VirtualToPhysicalMapping[100];
+    
     private static ThreadLocal<PCB> currentPCB = new ThreadLocal<>();
 
     public PCB(UserlandProcess up, OS.PriorityType priority) {
@@ -30,17 +27,15 @@ public class PCB {
         this.priority = priority;
         this.name = up.getClass().getSimpleName() + "-" + pid;
         
-        // Set this PCB in the UserlandProcess so it can use thread-local storage
         up.setPCB(this);
         
-        // Initialize device IDs
         for (int i = 0; i < 10; i++) {
             deviceIds[i] = -1;
         }
         
-        // Initialize page table - all pages unmapped
+        // Initialize to null instead of -1
         for (int i = 0; i < 100; i++) {
-            pageTable[i] = -1;
+            pageTable[i] = null;
         }
     }
     
@@ -64,7 +59,8 @@ public class PCB {
         return deviceIds;
     }
     
-    public int[] getPageTable() {
+    
+    public VirtualToPhysicalMapping[] getPageTable() {
         return pageTable;
     }
 

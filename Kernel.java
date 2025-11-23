@@ -6,27 +6,32 @@ public class Kernel extends Process implements Device {
     private VFS vfs = new VFS();
     private PCB idlePCB;
     
-    // Free page tracking: true = in use, false = free
-    // We have 1024 physical pages
-    private boolean[] freePages = new boolean[1024];
+    private boolean[] freeListofPages = new boolean[1024];
+    
+    private int swapFileId = -1;
+    private int nextSwapPage = 0;
 
     public Kernel(Scheduler scheduler) {
         this.scheduler = scheduler;
-        // Initialize all pages as free
+        
         for (int i = 0; i < 1024; i++) {
-            freePages[i] = false;
+            freeListofPages[i] = false;
+        }
+        
+        swapFileId = vfs.Open("swapfile.dat");
+        if (swapFileId == -1) {
+            System.out.println("WARNING: Could not open swap file!");
+        } else {
+            System.out.println("Swap file opened, id=" + swapFileId);
         }
     }
 
     public void main() {
         while (true) {
-            // Continuously listen for system calls from OS/userland
             handleSystemCall();
 
-            // Choose next process to run using the scheduler
             PCB next = scheduler.schedule();
 
-            // If nothing is ready, fall back to idle process (keeps CPU "alive")
             if (next == null && idlePCB != null) {
                 next = idlePCB;
             }
@@ -43,7 +48,6 @@ public class Kernel extends Process implements Device {
         List<Object> params;
         PCB callingPCB;
 
-        // Synchronize access to OS syscall queue since multiple processes might request syscalls
         synchronized (OS.class) {
             call = OS.currentCall;
             OS.currentCall = OS.CallType.None;
@@ -56,21 +60,15 @@ public class Kernel extends Process implements Device {
             callingPCB = scheduler.getCurrentlyRunning();
         }
 
-        // Switch for system calls
         switch (call) {
 
             case CreateProcess: {
-                // Extract parameters
                 UserlandProcess up = (UserlandProcess) params.get(0);
                 OS.PriorityType p = (OS.PriorityType) params.get(1);
 
-                // Create the process
                 int pid = scheduler.CreateProcess(up, p);
 
-                // If this is the idle process, save it for fallback use
                 if (up instanceof IdleProcess) {
-                    // Find the PCB we just created in the background queue
-                    // Note: IdleProcess is always created with background priority
                     if (!scheduler.backgroundQueue.isEmpty()) {
                         PCB lastAdded = scheduler.backgroundQueue.peekLast();
                         if (lastAdded != null && lastAdded.getPid() == pid) {
@@ -79,7 +77,6 @@ public class Kernel extends Process implements Device {
                     }
                 }
 
-                // Store the PID as the return value
                 synchronized (OS.class) {
                     OS.retVal = pid;
                     OS.class.notifyAll();
@@ -88,17 +85,15 @@ public class Kernel extends Process implements Device {
             }
 
             case SwitchProcess:
-                // Process is voluntarily giving up CPU
                 if (scheduler.currentlyRunning != null) {
                     scheduler.currentlyRunning.resetTimeoutCount();
                     scheduler.currentlyRunning.stop();
-                    scheduler.addBack(scheduler.currentlyRunning); // put back into ready queue
+                    scheduler.addBack(scheduler.currentlyRunning);
                     scheduler.currentlyRunning = null;
                 }
                 break;
 
             case SwitchProcessQuantum:
-                // Process used its full time quantum
                 if (scheduler.currentlyRunning != null) {
                     scheduler.currentlyRunning.incTimeoutCount();
                     scheduler.currentlyRunning.demoteIfNeeded();
@@ -133,7 +128,6 @@ public class Kernel extends Process implements Device {
 
             case Exit:
                 if (callingPCB != null) {
-                    // Close all open devices
                     int[] deviceIds = callingPCB.getDeviceIds();
                     for (int i = 0; i < deviceIds.length; i++) {
                         if (deviceIds[i] != -1) {
@@ -142,16 +136,16 @@ public class Kernel extends Process implements Device {
                         }
                     }
 
-                    // Free all memory allocated to this process
                     FreeProcessMemory(callingPCB);
 
-                    // Stop the process
                     callingPCB.stop();
 
-                    // Clear from scheduler if it's currently running
                     if (scheduler.currentlyRunning == callingPCB) {
                         scheduler.currentlyRunning = null;
                     }
+                    
+                    // Remove from scheduler's process map
+                    scheduler.pidToPcb.remove(callingPCB.getPid());
                 }
                 break;
 
@@ -160,11 +154,9 @@ public class Kernel extends Process implements Device {
                 int result = -1;
 
                 if (callingPCB != null) {
-                    // Find empty slot in process's device array
                     int[] deviceIds = callingPCB.getDeviceIds();
                     for (int i = 0; i < deviceIds.length; i++) {
                         if (deviceIds[i] == -1) {
-                            // Open device and map to user fd
                             int vfsSlot = vfs.Open(devicePath);
                             if (vfsSlot != -1) {
                                 deviceIds[i] = vfsSlot;
@@ -174,7 +166,6 @@ public class Kernel extends Process implements Device {
                         }
                     }
 
-                    // Store result and wake up process
                     synchronized (callingPCB) {
                         callingPCB.syscallReturnValue = result;
                         callingPCB.notifyAll();
@@ -187,7 +178,6 @@ public class Kernel extends Process implements Device {
                 int id = (int) params.get(0);
 
                 if (callingPCB != null) {
-                    // Close the device if valid
                     synchronized (callingPCB) {
                         int[] deviceIds = callingPCB.getDeviceIds();
                         if (id >= 0 && id < deviceIds.length && deviceIds[id] != -1) {
@@ -195,7 +185,6 @@ public class Kernel extends Process implements Device {
                             deviceIds[id] = -1;
                         }
 
-                        // Store result and wake up process
                         callingPCB.syscallReturnValue = 0;
                         callingPCB.notifyAll();
                     }
@@ -210,13 +199,11 @@ public class Kernel extends Process implements Device {
 
                 if (callingPCB != null) {
                     synchronized (callingPCB) {
-                        // Read from device if valid
                         int[] deviceIds = callingPCB.getDeviceIds();
                         if (id >= 0 && id < deviceIds.length && deviceIds[id] != -1) {
                             result = vfs.Read(deviceIds[id], size);
                         }
 
-                        // Return result
                         callingPCB.syscallReturnValue = result;
                         callingPCB.notifyAll();
                     }
@@ -251,13 +238,11 @@ public class Kernel extends Process implements Device {
                 int to = (int) params.get(1);
 
                 if (callingPCB != null) {
-                    // Seek in device if valid
                     int[] deviceIds = callingPCB.getDeviceIds();
                     if (id >= 0 && id < deviceIds.length && deviceIds[id] != -1) {
                         vfs.Seek(deviceIds[id], to);
                     }
 
-                    // Store result and wake up process
                     synchronized (callingPCB) {
                         callingPCB.syscallReturnValue = 0;
                         callingPCB.notifyAll();
@@ -354,10 +339,9 @@ public class Kernel extends Process implements Device {
                 int virtualPage = (int) params.get(0);
                 GetMappingInternal(callingPCB, virtualPage);
                 
-                // Notify the calling process that GetMapping is complete
                 if (callingPCB != null) {
                     synchronized (callingPCB) {
-                        callingPCB.syscallReturnValue = 0; // Dummy value to indicate completion
+                        callingPCB.syscallReturnValue = 0;
                         callingPCB.notifyAll();
                     }
                 }
@@ -373,26 +357,28 @@ public class Kernel extends Process implements Device {
     // ---------------- Memory Management Methods ----------------
 
     private int AllocateMemoryInternal(PCB pcb, int size) {
-        if (pcb == null) return -1;
-        
+        if (pcb == null) {
+            return -1;
+        }
+
         if (size % 1024 != 0) {
             System.out.println("AllocateMemory: size must be multiple of 1024");
             return -1;
         }
-        
+
         int numPages = size / 1024;
         if (numPages <= 0 || numPages > 100) {
             System.out.println("AllocateMemory: invalid number of pages: " + numPages);
             return -1;
         }
-        
-        int[] pageTable = pcb.getPageTable();
+
+        VirtualToPhysicalMapping[] pageTable = pcb.getPageTable();
         int startVirtualPage = -1;
-        
+
         for (int i = 0; i <= pageTable.length - numPages; i++) {
             boolean foundBlock = true;
             for (int j = 0; j < numPages; j++) {
-                if (pageTable[i + j] != -1) {
+                if (pageTable[i + j] != null) {
                     foundBlock = false;
                     break;
                 }
@@ -402,69 +388,60 @@ public class Kernel extends Process implements Device {
                 break;
             }
         }
-        
+
         if (startVirtualPage == -1) {
-            System.out.println("AllocateMemory: no contiguous virtual space found");
+            System.out.println("AllocateMemory: no virtual space found");
             return -1;
         }
-        
-        int[] physicalPages = new int[numPages];
-        int foundPages = 0;
-        
-        for (int i = 0; i < freePages.length && foundPages < numPages; i++) {
-            if (!freePages[i]) {
-                physicalPages[foundPages++] = i;
-            }
-        }
-        
-        if (foundPages < numPages) {
-            System.out.println("AllocateMemory: not enough physical memory");
-            return -1;
-        }
-        
+
+        // LAZY ALLOCATION
         for (int i = 0; i < numPages; i++) {
-            int physPage = physicalPages[i];
-            freePages[physPage] = true;
-            pageTable[startVirtualPage + i] = physPage;
+            pageTable[startVirtualPage + i] = new VirtualToPhysicalMapping();
         }
-        
-        System.out.println("AllocateMemory: allocated " + numPages + " pages starting at virtual page " + startVirtualPage);
-        
+
+        System.out.println("AllocateMemory: lazily allocated " + numPages + 
+                          " pages starting at virtual page " + startVirtualPage);
+
         return startVirtualPage * 1024;
     }
     
     private boolean FreeMemoryInternal(PCB pcb, int pointer, int size) {
         if (pcb == null) return false;
-        
+
         if (pointer % 1024 != 0 || size % 1024 != 0) {
             System.out.println("FreeMemory: pointer and size must be multiples of 1024");
             return false;
         }
-        
+
         int startVirtualPage = pointer / 1024;
         int numPages = size / 1024;
-        
+
         if (startVirtualPage < 0 || startVirtualPage + numPages > 100) {
             System.out.println("FreeMemory: invalid virtual page range");
             return false;
         }
-        
-        int[] pageTable = pcb.getPageTable();
-        
+
+        VirtualToPhysicalMapping[] pageTable = pcb.getPageTable();
+
         for (int i = 0; i < numPages; i++) {
-            if (pageTable[startVirtualPage + i] == -1) {
+            if (pageTable[startVirtualPage + i] == null) {
                 System.out.println("FreeMemory: trying to free unallocated page");
                 return false;
             }
         }
-        
+
         for (int i = 0; i < numPages; i++) {
-            int physPage = pageTable[startVirtualPage + i];
-            freePages[physPage] = false;
-            pageTable[startVirtualPage + i] = -1;
+            VirtualToPhysicalMapping mapping = pageTable[startVirtualPage + i];
+            
+            if (mapping.physicalPage != -1) {
+                freeListofPages[mapping.physicalPage] = false;
+            }
+            
+            pageTable[startVirtualPage + i] = null;
         }
-        
-        System.out.println("FreeMemory: freed " + numPages + " pages starting at virtual page " + startVirtualPage);
+
+        System.out.println("FreeMemory: freed " + numPages + " pages starting at virtual page "
+                + startVirtualPage);
         return true;
     }
     
@@ -473,41 +450,172 @@ public class Kernel extends Process implements Device {
             System.out.println("GetMapping: ERROR - null PCB!");
             return;
         }
-        
-        int[] pageTable = pcb.getPageTable();
-        
+
+        VirtualToPhysicalMapping[] pageTable = pcb.getPageTable();
+
         if (virtualPage < 0 || virtualPage >= pageTable.length) {
-            System.out.println("SEG FAULT: Process " + pcb.getName() + " accessed out-of-bounds virtual page " + virtualPage);
+            System.out.println("SEG FAULT: Process " + pcb.getName() + 
+                             " accessed out-of-bounds virtual page " + virtualPage);
             KillProcess(pcb);
             return;
         }
-        
-        int physicalPage = pageTable[virtualPage];
-        
-        if (physicalPage == -1) {
-            System.out.println("SEG FAULT: Process " + pcb.getName() + " accessed unmapped virtual page " + virtualPage);
+
+        VirtualToPhysicalMapping mapping = pageTable[virtualPage];
+        if (mapping == null) {
+            System.out.println("SEG FAULT: Process " + pcb.getName() + 
+                             " accessed unallocated virtual page " + virtualPage);
             KillProcess(pcb);
             return;
         }
+
+        // DEMAND PAGING
+        if (mapping.physicalPage == -1) {
+            System.out.println("Page fault: Process " + pcb.getName() + 
+                             " accessing virtual page " + virtualPage + " for first time");
+            
+            // Try to find a free physical page
+            int freePage = -1;
+            for (int i = 0; i < freeListofPages.length; i++) {
+                if (!freeListofPages[i]) {
+                    freePage = i;
+                    break;
+                }
+            }
+            
+            // If no free page, swap one out
+            if (freePage == -1) {
+                System.out.println("No free physical pages - need to swap");
+                
+                PCB victimPCB = scheduler.getRandomProcess();
+                if (victimPCB == null) {
+                    System.out.println("CRITICAL: No process to swap from!");
+                    KillProcess(pcb);
+                    return;
+                }
+                
+                VirtualToPhysicalMapping[] victimTable = victimPCB.getPageTable();
+                int victimVirtualPage = -1;
+                for (int i = 0; i < victimTable.length; i++) {
+                    if (victimTable[i] != null && victimTable[i].physicalPage != -1) {
+                        victimVirtualPage = i;
+                        break;
+                    }
+                }
+                
+                if (victimVirtualPage == -1) {
+                    System.out.println("CRITICAL: Victim has no physical pages!");
+                    KillProcess(pcb);
+                    return;
+                }
+                
+                VirtualToPhysicalMapping victimMapping = victimTable[victimVirtualPage];
+                freePage = victimMapping.physicalPage;
+                
+                System.out.println("Swapping out: Process " + victimPCB.getName() + 
+                                 ", VP " + victimVirtualPage + ", PP " + freePage);
+                
+                if (victimMapping.diskPage == -1) {
+                    victimMapping.diskPage = nextSwapPage++;
+                }
+                
+                WritePageToDisk(freePage, victimMapping.diskPage);
+                
+                victimMapping.physicalPage = -1;
+                
+                // IMPORTANT: Clear TLB after swapping to invalidate old mappings
+                Hardware.ClearTLB();
+            }
+            
+            // Assign physical page
+            mapping.physicalPage = freePage;
+            freeListofPages[freePage] = true;
+            
+            // Load from disk or zero out
+            if (mapping.diskPage != -1) {
+                System.out.println("Loading from disk: disk page " + mapping.diskPage);
+                LoadPageFromDisk(mapping.diskPage, freePage);
+            } else {
+                System.out.println("Zeroing out new page " + freePage);
+                ZeroOutPage(freePage);
+            }
+        }
         
-        // Valid mapping - update TLB
-        Hardware.UpdateTLB(virtualPage, physicalPage);
+        // Update TLB - this ensures current process has correct mapping
+        Hardware.UpdateTLB(virtualPage, mapping.physicalPage);
+    }
+    
+    // Direct physical memory access
+    private void WritePageToDisk(int physicalPage, int diskPage) {
+        if (swapFileId == -1) {
+            System.out.println("ERROR: Swap file not open!");
+            return;
+        }
+        
+        byte[] pageData = new byte[1024];
+        byte[] memory = Hardware.getMemory();
+        int physicalAddress = physicalPage * 1024;
+        
+        // Copy from physical memory
+        System.arraycopy(memory, physicalAddress, pageData, 0, 1024);
+        
+        // Write to swap file
+        vfs.Seek(swapFileId, diskPage * 1024);
+        int written = vfs.Write(swapFileId, pageData);
+        
+        if (written != 1024) {
+            System.out.println("WARNING: Wrote " + written + " bytes instead of 1024");
+        }
+    }
+    
+    //Direct physical memory access
+    private void LoadPageFromDisk(int diskPage, int physicalPage) {
+        if (swapFileId == -1) {
+            System.out.println("ERROR: Swap file not open!");
+            ZeroOutPage(physicalPage);
+            return;
+        }
+        
+        vfs.Seek(swapFileId, diskPage * 1024);
+        byte[] pageData = vfs.Read(swapFileId, 1024);
+        
+        if (pageData == null || pageData.length != 1024) {
+            System.out.println("ERROR: Could not read full page from disk");
+            ZeroOutPage(physicalPage);
+            return;
+        }
+        
+        // Write to physical memory
+        byte[] memory = Hardware.getMemory();
+        int physicalAddress = physicalPage * 1024;
+        System.arraycopy(pageData, 0, memory, physicalAddress, 1024);
+    }
+    
+    // Direct physical memory access
+    private void ZeroOutPage(int physicalPage) {
+        byte[] memory = Hardware.getMemory();
+        int physicalAddress = physicalPage * 1024;
+        
+        for (int i = 0; i < 1024; i++) {
+            memory[physicalAddress + i] = 0;
+        }
     }
     
     private void FreeProcessMemory(PCB pcb) {
         if (pcb == null) return;
-        
-        int[] pageTable = pcb.getPageTable();
+
+        VirtualToPhysicalMapping[] pageTable = pcb.getPageTable();
         int freedPages = 0;
-        
+
         for (int i = 0; i < pageTable.length; i++) {
-            if (pageTable[i] != -1) {
-                freePages[pageTable[i]] = false;
-                pageTable[i] = -1;
-                freedPages++;
+            if (pageTable[i] != null) {
+                if (pageTable[i].physicalPage != -1) {
+                    freeListofPages[pageTable[i].physicalPage] = false;
+                    freedPages++;
+                }
+                pageTable[i] = null;
             }
         }
-        
+
         if (freedPages > 0) {
             System.out.println("Freed " + freedPages + " pages from process " + pcb.getName());
         }
@@ -515,10 +623,9 @@ public class Kernel extends Process implements Device {
     
     private void KillProcess(PCB pcb) {
         if (pcb == null) return;
-        
+
         System.out.println("KERNEL: Killing process " + pcb.getName() + " due to segmentation fault");
-        
-        // Close all devices
+
         int[] deviceIds = pcb.getDeviceIds();
         for (int i = 0; i < deviceIds.length; i++) {
             if (deviceIds[i] != -1) {
@@ -526,22 +633,16 @@ public class Kernel extends Process implements Device {
                 deviceIds[i] = -1;
             }
         }
-        
-        // Free memory
+
         FreeProcessMemory(pcb);
-        
-        // Request stop on the process thread
+
         pcb.requestStop();
-        
-        // Stop the process
         pcb.stop();
-        
-        // Remove from currently running
+
         if (scheduler.currentlyRunning == pcb) {
             scheduler.currentlyRunning = null;
         }
-        
-        // Remove from PID map
+
         scheduler.pidToPcb.remove(pcb.getPid());
     }
 

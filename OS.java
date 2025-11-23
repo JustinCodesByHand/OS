@@ -7,7 +7,10 @@ public class OS {
     public static Object retVal;
     public static PCB currentSyscallPCB;
 
-    public enum CallType { None, CreateProcess, SwitchProcess, SwitchProcessQuantum, GetPID, Exit, Sleep, Open, Close, Read, Write, Seek, GetPidByName, SendMessage, WaitForMessage, AllocateMemory, FreeMemory, GetMapping }
+    public enum CallType { None, CreateProcess, SwitchProcess,
+        SwitchProcessQuantum, GetPID, Exit, Sleep, Open, Close,
+        Read, Write, Seek, GetPidByName, SendMessage, WaitForMessage,
+        AllocateMemory, FreeMemory, GetMapping }
     public static CallType currentCall;
 
     private static void startTheKernel() {
@@ -18,6 +21,7 @@ public class OS {
     }
 
     public static void Startup(UserlandProcess init) {
+        // Use interactive priority for Init - it will create processes then yield
         CreateProcess(init, PriorityType.interactive);
         CreateProcess(new IdleProcess(), PriorityType.background);
     }
@@ -126,7 +130,7 @@ public class OS {
     // ---------------- File/Device Syscalls ----------------
 
     public static int Open(String deviceSpec) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return -1;
             if (callingPCB == null) return -1;
@@ -147,7 +151,7 @@ public class OS {
     }
 
     public static int Write(int id, byte[] data) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return 0;
             if (callingPCB == null) return 0;
@@ -169,7 +173,7 @@ public class OS {
     }
 
     public static void Close(int id) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return;
             if (callingPCB == null) return;
@@ -189,7 +193,7 @@ public class OS {
     }
 
     public static byte[] Read(int id, int size) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return null;
             if (callingPCB == null) return null;
@@ -211,7 +215,7 @@ public class OS {
     }
 
     public static void Seek(int id, int to) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return;
             if (callingPCB == null) return;
@@ -294,64 +298,69 @@ public class OS {
     public static void GetMapping(int virtualPage) {
         PCB callingPCB = PCB.getCurrent();
         if (callingPCB == null) {
-           
             return;
         }
-        
+
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) {
                 System.out.println("No kernel/scheduler!");
                 return;
             }
-            
-            
+
             synchronized (callingPCB) {
                 callingPCB.syscallReturnValue = null;
             }
-            
+
             parameters.clear();
             parameters.add(virtualPage);
             currentSyscallPCB = callingPCB;
             currentCall = CallType.GetMapping;
             startTheKernel();
         }
-        
-        // CRITICAL: Wait for the kernel to process the GetMapping
-        // The kernel will set syscallReturnValue when done
+
         waitForReturnValue(callingPCB);
     }
-    
+
+
     public static int AllocateMemory(int size) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
-            if (ki == null || ki.scheduler == null) return -1;
-            if (callingPCB == null) return -1;
-            
+            if (ki == null || ki.scheduler == null){
+                return -1;
+            }
+            if (callingPCB == null){
+                return -1;
+            }
+
             synchronized (callingPCB) {
                 callingPCB.syscallReturnValue = null;
             }
-            
+
             parameters.clear();
             parameters.add(size);
             currentSyscallPCB = callingPCB;
             currentCall = CallType.AllocateMemory;
             startTheKernel();
         }
-        
+
         Object result = waitForReturnValue(callingPCB);
-        return (result instanceof Integer) ? (int) result : -1;
+        if (result instanceof Integer) {
+            return (int) result;
+        } else {
+            return -1;
+        }
     }
-    
+
     public static boolean FreeMemory(int pointer, int size) {
-        PCB callingPCB = PCB.getCurrent();  // Use thread-local PCB
+        PCB callingPCB = PCB.getCurrent();
         synchronized (OS.class) {
             if (ki == null || ki.scheduler == null) return false;
             if (callingPCB == null) return false;
-            
+
             synchronized (callingPCB) {
                 callingPCB.syscallReturnValue = null;
             }
-            
+
             parameters.clear();
             parameters.add(pointer);
             parameters.add(size);
@@ -359,8 +368,12 @@ public class OS {
             currentCall = CallType.FreeMemory;
             startTheKernel();
         }
-        
+
         Object result = waitForReturnValue(callingPCB);
-        return (result instanceof Boolean) ? (boolean) result : false;
+        if (result instanceof Boolean) {
+            return (boolean) result;
+        } else {
+            return false;
+        }
     }
 }

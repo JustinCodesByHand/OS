@@ -15,17 +15,25 @@ public class VFS implements Device {
     }
 
     @Override
-    public int Open(String deviceSpec) {
-        // Simple parsing: default to file unless starts with "random"
+    public synchronized int Open(String deviceSpec) {
+        if (deviceSpec == null || deviceSpec.isEmpty()) {
+            return -1;
+        }
+
+        // Parse device specification
         Device targetDevice = fakeFileSystem;
         String params = deviceSpec;
 
         if (deviceSpec.startsWith("random")) {
             targetDevice = randomDevice;
-            params = deviceSpec.length() > 6 ? deviceSpec.substring(7) : "";
+            // Extract seed if provided (format: "random 12345" or just "random")
+            params = deviceSpec.length() > 6 ? deviceSpec.substring(7).trim() : "";
         } else if (deviceSpec.startsWith("file ")) {
-            params = deviceSpec.substring(5);
+            // Explicit file prefix (format: "file myfile.txt")
+            targetDevice = fakeFileSystem;
+            params = deviceSpec.substring(5).trim();
         }
+        // If no prefix, default to file with full deviceSpec as filename
 
         // Open device
         int underlyingId = targetDevice.Open(params);
@@ -40,13 +48,13 @@ public class VFS implements Device {
             }
         }
 
-        // No slots available
+        // No slots available - clean up
         targetDevice.Close(underlyingId);
         return -1;
     }
 
     @Override
-    public void Close(int id) {
+    public synchronized void Close(int id) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
             devices[id].Close(deviceIds[id]);
             devices[id] = null;
@@ -55,7 +63,7 @@ public class VFS implements Device {
     }
 
     @Override
-    public byte[] Read(int id, int size) {
+    public synchronized byte[] Read(int id, int size) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
             return devices[id].Read(deviceIds[id], size);
         }
@@ -63,17 +71,19 @@ public class VFS implements Device {
     }
 
     @Override
-    public void Seek(int id, int to) {
+    public synchronized void Seek(int id, int to) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
             devices[id].Seek(deviceIds[id], to);
         }
     }
 
     @Override
-    public int Write(int id, byte[] data) {
+    public synchronized int Write(int id, byte[] data) {
         if (id >= 0 && id < deviceIds.length && devices[id] != null) {
-            return devices[id].Write(deviceIds[id], data);
+            int result = devices[id].Write(deviceIds[id], data);
+            return result;
         }
+       
         return 0;
     }
 }

@@ -12,19 +12,39 @@ public class PCB {
 
     private int[] deviceIds = new int[10];
 
-    // For storing syscall return values per-process
     public Object syscallReturnValue = null;
 
     public LinkedList<KernelMessage> messageQueue = new LinkedList<>();
+
+    
+    private VirtualToPhysicalMapping[] pageTable = new VirtualToPhysicalMapping[100];
+    
+    private static ThreadLocal<PCB> currentPCB = new ThreadLocal<>();
 
     public PCB(UserlandProcess up, OS.PriorityType priority) {
         this.pid = nextPid++;
         this.userlandProcess = up;
         this.priority = priority;
         this.name = up.getClass().getSimpleName() + "-" + pid;
+        
+        up.setPCB(this);
+        
         for (int i = 0; i < 10; i++) {
             deviceIds[i] = -1;
         }
+        
+        // Initialize to null instead of -1
+        for (int i = 0; i < 100; i++) {
+            pageTable[i] = null;
+        }
+    }
+    
+    public static PCB getCurrent() {
+        return currentPCB.get();
+    }
+    
+    public static void setCurrent(PCB pcb) {
+        currentPCB.set(pcb);
     }
 
     public int getPid() {
@@ -37,6 +57,11 @@ public class PCB {
 
     public int[] getDeviceIds() {
         return deviceIds;
+    }
+    
+    
+    public VirtualToPhysicalMapping[] getPageTable() {
+        return pageTable;
     }
 
     public OS.PriorityType getPriority() {
@@ -78,6 +103,10 @@ public class PCB {
 
     public void stop() {
         userlandProcess.stop();
+    }
+    
+    public UserlandProcess getUserlandProcess() {
+        return userlandProcess;
     }
 
     public boolean isDone() {

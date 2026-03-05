@@ -5,10 +5,13 @@ public class KernelMessage {
     private byte[] data;
 
     public KernelMessage(int targetPid, int what, byte[] data) {
-        this.senderPid = getSenderPid();
         this.targetPid = targetPid;
         this.what = what;
-        this.data = data != null ? data.clone() : null;
+        if (data == null) {
+            this.data = null;
+        } else {
+            this.data = data.clone();
+        }
     }
 
     // Copy constructor
@@ -16,7 +19,11 @@ public class KernelMessage {
         this.senderPid = other.senderPid;
         this.targetPid = other.targetPid;
         this.what = other.what;
-        this.data = other.data != null ? other.data.clone() : null;
+        if (data == null) {
+            this.data = null;
+        } else {
+            this.data = other.data.clone();
+        }
     }
 
     public void setSenderPid(int senderPid) {

@@ -12,13 +12,13 @@ public class RandomDevice implements Device {
         // Loop through all 10 slots looking for an empty one
         for (int i = 0; i < randomDevices.length; i++) {
 
-            // null means unused
+        
             if (randomDevices[i] == null) {
 
                 // Check if the user provided a seed value
                 if (deviceSpec != null && !deviceSpec.isEmpty()) {
                     try {
-                        // Try to parse the string as a long integer
+                   
                         long seed = Long.parseLong(deviceSpec);
 
                         // Create a seeded Random to produce the same sequence
@@ -76,9 +76,6 @@ public class RandomDevice implements Device {
 
             // Make a temp array to hold bytes
             byte[] tempArray = new byte[to];
-
-            // Put 'to' number of random bytes into the tempArray
-            // Moves the RNG's index forward by 'to' positions
             randomDevices[id].nextBytes(tempArray);
         }
     }

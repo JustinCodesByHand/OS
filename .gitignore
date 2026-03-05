@@ -1,0 +1,26 @@
+# Compiled Java class files
+*.class
+
+# Build output (IntelliJ IDEA)
+out/
+
+# IntelliJ IDEA project files (keep .idea/ tracked for project settings,
+# but exclude user-specific and generated files)
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries/
+.idea/shelf/
+
+# macOS metadata
+.DS_Store
+__MACOSX/
+
+# Archive files that are not source
+*.zip
+*.jar
+
+# Swap and temp files
+*.swp
+*~
+swapfile.dat

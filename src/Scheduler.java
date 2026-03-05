@@ -97,7 +97,36 @@ public class Scheduler {
         }
 
         PCB next = chosen.pollFirst();
+        
+        if (next != null && currentlyRunning != next) {
+            Hardware.ClearTLB();
+        }
+        
         currentlyRunning = next;
         return next;
+    }
+    
+   
+    public synchronized PCB getRandomProcess() {
+        List<PCB> allProcesses = new ArrayList<>(pidToPcb.values());
+        
+        if (allProcesses.isEmpty()) {
+            return null;
+        }
+        
+        // Keep trying random processes until we find one with physical memory
+        Collections.shuffle(allProcesses, rand);
+        
+        for (PCB pcb : allProcesses) {
+            VirtualToPhysicalMapping[] pageTable = pcb.getPageTable();
+            // Check if this process has at least one page with physical memory
+            for (int i = 0; i < pageTable.length; i++) {
+                if (pageTable[i] != null && pageTable[i].physicalPage != -1) {
+                    return pcb;
+                }
+            }
+        }
+        
+        return null;
     }
 }
